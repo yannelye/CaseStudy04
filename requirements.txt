@@ -1,5 +1,3 @@
-Flask==2.0.3
-pydantic==1.9.2
-Flask-Cors==4.0.1
-pytest==7.0.1
-pydantic[email]
+fastapi==0.111.0
+uvicorn==0.30.1
+pydantic==2.8.2
