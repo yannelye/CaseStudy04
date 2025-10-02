@@ -1,25 +1,17 @@
-import os, json
+import json
+from pathlib import Path
+from datetime import datetime
+from typing import Mapping, Any
 
-def append_ndjson(record: dict, path: str) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+RESULTS_PATH = Path("data/survey.ndjson")
 
-def exists_submission_id(path: str, sub_id: str) -> bool:
-    if not os.path.exists(path):
-        return False
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                    if obj.get("submission_id") == sub_id:
-                        return True
-                except Exception:
-                    continue
-    except Exception:
-        return False
-    return False
+def append_json_line(record: Mapping[str, Any]) -> None:
+    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with RESULTS_PATH.open("a", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                record,
+                ensure_ascii=False,
+                default=lambda o: o.isoformat() if isinstance(o, datetime) else o
+            ) + "\n"
+        )
