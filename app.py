@@ -68,5 +68,4 @@ def intake():
     return jsonify(status="ok"), 201
 
 if __name__ == "__main__":
-    # Flask dev server; Gradescope will import/run this on port 5000
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(port=5000, debug=True))

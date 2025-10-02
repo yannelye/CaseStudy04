@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 submissions.json
 frontend/
+.pyenv/
+DS2022/
+CaseStudy_02/
+nyc3111/
