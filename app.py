@@ -1,71 +1,62 @@
+import hashlib
+
+def sha256_hex(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
 from datetime import datetime, timezone
-import hashlib, json, os
 from flask import Flask, request, jsonify
-from models import SurveySubmission
-from storage import append_ndjson, exists_submission_id
+from flask_cors import CORS
+from pydantic import ValidationError
+from models import SurveySubmission, StoredSurveyRecord
+from storage import append_json_line
 
 app = Flask(__name__)
-DATA_PATH = "data/survey.ndjson"
+# Allow cross-origin requests so the static HTML can POST from localhost or file://
+CORS(app, resources={r"/v1/*": {"origins": "*"}})
 
-def sha256(s: str) -> str:
-    return hashlib.sha256(s.encode()).hexdigest()
-
-def compute_submission_id(email: str) -> str:
-    ts_hour = datetime.now(timezone.utc).strftime("%Y%m%d%H")
-    return sha256(email + ts_hour)
-
-@app.get("/ping")
+@app.route("/ping", methods=["GET"])
 def ping():
-    return {
-        "message": "API is alive",
+    """Simple health check endpoint."""
+    return jsonify({
         "status": "ok",
+        "message": "API is alive",
         "utc_time": datetime.now(timezone.utc).isoformat()
-    }, 200
+    })
 
 @app.post("/v1/survey")
-def intake():
-    if not request.is_json:
-        return jsonify(error="Body must be JSON"), 400
+def submit_survey():
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return jsonify({"error": "invalid_json", "detail": "Body must be application/json"}), 400
+
     try:
-        payload = request.get_json()
-    except Exception:
-        return jsonify(error="Invalid JSON"), 400
+        submission = SurveySubmission(**payload)
+    except ValidationError as ve:
+        return jsonify({"error": "validation_error", "detail": ve.errors()}), 422
 
-    # Server-enriched fields
-    payload.setdefault("user_agent", request.headers.get("User-Agent"))
-    payload.setdefault("source", payload.get("source", "other"))
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-
-    # Validate (Pydantic v1)
-    try:
-        sub = SurveySubmission(**payload)
-    except Exception as e:
-        # Pydantic v1 exposes .errors(); fall back to str(e) if missing
-        errors = e.errors() if hasattr(e, "errors") else str(e)
-        return jsonify(detail="Validation error", errors=errors), 422
-
-    # Idempotency
-    sub_id = sub.submission_id or compute_submission_id(sub.email)
-    if exists_submission_id(DATA_PATH, sub_id):
-        return jsonify(status="ok", duplicated=True, submission_id=sub_id), 201
-
-    # Privacy: hash email & age; do NOT log plaintext PII
-    record = {
-        "name": sub.name,
-        "email": sha256(sub.email),
-        "age": sha256(str(sub.age)),
-        "consent": sub.consent,
-        "rating": sub.rating,
-        "comments": sub.comments,
-        "source": sub.source,
-        "received_at": datetime.now(timezone.utc).isoformat(),
-        "ip": ip,
-        "user_agent": sub.user_agent,
-        "submission_id": sub_id,
-    }
-
-    append_ndjson(record, DATA_PATH)
-    return jsonify(status="ok"), 201
+    email_norm = submission.email.strip().lower() 
+    hashed_email = sha256_hex(email_norm) 
+    hashed_age = sha256_hex(str(submission.age)) 
+    
+    hour_stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H")
+    submission_id = submission.submission_id or sha256_hex(email_norm + hour_stamp) 
+    
+    record = StoredSurveyRecord( 
+        name=submission.name,
+        consent=submission.consent,
+        rating=submission.rating,
+        comments=submission.comments,
+        source=submission.source,
+        user_agent=submission.user_agent, 
+        
+        hashed_email=hashed_email,
+        hashed_age=hashed_age,
+        submission_id=submission_id, 
+        
+        received_at=datetime.now(timezone.utc),
+        ip=request.headers.get("X-Forwarded-For", request.remote_addr or "") )
+    append_json_line(record.dict())
+    return jsonify({"status": "ok", "submission_id" : submission_id}), 201
 
 if __name__ == "__main__":
-    app.run(port=5000, debug=True))
+    app.run(port=5000, debug=True)
